@@ -15,9 +15,9 @@ public sealed class RegisterValidator : AbstractValidator<RegisterRequest>
         RuleFor(x => x.MonthlyIncome).GreaterThanOrEqualTo(0);
         RuleFor(x => x.Password)
             .MinimumLength(8)
-            .Matches("[A-Z]").WithMessage("Password must contain an uppercase letter.")
-            .Matches("[a-z]").WithMessage("Password must contain a lowercase letter.")
-            .Matches("[0-9]").WithMessage("Password must contain a number.");
+            .Matches("[A-Z]").WithMessage("პაროლი უნდა შეიცავდეს დიდ ასოს.")
+            .Matches("[a-z]").WithMessage("პაროლი უნდა შეიცავდეს პატარა ასოს.")
+            .Matches("[0-9]").WithMessage("პაროლი უნდა შეიცავდეს ციფრს.");
     }
 }
 public sealed class LoginValidator : AbstractValidator<LoginRequest>
@@ -29,4 +29,4 @@ public sealed class UpdateLoanValidator : AbstractValidator<UpdateLoanRequest>
 public sealed class AccountantLoanValidator : AbstractValidator<UpdateAccountantLoanRequest>
 { public AccountantLoanValidator() { RuleFor(x => x.LoanType).IsInEnum(); RuleFor(x => x.Status).IsInEnum(); RuleFor(x => x.Amount).GreaterThan(0); RuleFor(x => x.Currency).NotEmpty().Length(3).Matches("^[a-zA-Z]{3}$"); RuleFor(x => x.Period).InclusiveBetween(1, 360); } }
 public sealed class BlockUserValidator : AbstractValidator<BlockUserRequest>
-{ public BlockUserValidator() { RuleFor(x => x.BlockedUntil).Must(x => x is null || x > DateTime.UtcNow).WithMessage("BlockedUntil must be a future UTC date."); } }
+{ public BlockUserValidator() { RuleFor(x => x.BlockedUntil).Must(x => x is null || x > DateTime.UtcNow).WithMessage("BlockedUntil უნდა იყოს მომავალი UTC თარიღი."); } }

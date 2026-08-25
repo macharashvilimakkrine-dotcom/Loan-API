@@ -15,7 +15,6 @@ namespace LoanApi.Api.Infrastructure.Migrations
     [Migration("20260824151537_InitialSqlServer")]
     partial class InitialSqlServer
     {
-        /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618

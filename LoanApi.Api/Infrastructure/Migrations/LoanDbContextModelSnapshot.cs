@@ -187,7 +187,9 @@ namespace LoanApi.Api.Infrastructure.Migrations
                         .HasColumnType("nvarchar(80)");
 
                     b.Property<bool>("IsBlocked")
-                        .HasColumnType("bit");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
 
                     b.Property<string>("LastName")
                         .IsRequired()

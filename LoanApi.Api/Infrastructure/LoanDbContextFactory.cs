@@ -9,7 +9,7 @@ public sealed class LoanDbContextFactory : IDesignTimeDbContextFactory<LoanDbCon
     public LoanDbContext CreateDbContext(string[] args)
     {
         var options = new DbContextOptionsBuilder<LoanDbContext>()
-            .UseSqlServer("Server=localhost\\SQLEXPRESS02;Database=LoanApiDb;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True")
+            .UseSqlServer("Server=localhost\\SQLEXPRESS;Database=LoanApiDb;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True")
             .Options;
 
         return new LoanDbContext(options);

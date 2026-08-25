@@ -1,8 +1,11 @@
 using LoanApi.Api.Application;
 using LoanApi.Api.Domain;
 using LoanApi.Api.Infrastructure;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace LoanApi.Tests;
 
@@ -242,6 +245,21 @@ public sealed class AuthServiceTests
 
         await Assert.ThrowsAsync<UnauthorizedException>(() => service.LoginAsync(new LoginRequest("testuser", "wrong-password")));
     }
+
+    [Fact]
+    public async Task Login_rejects_unknown_username()
+    {
+        await using var db = new LoanDbContext(new DbContextOptionsBuilder<LoanDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Jwt:Key"] = "unit-test-key-that-is-longer-than-thirty-two-characters",
+            ["Jwt:Issuer"] = "LoanApi",
+            ["Jwt:Audience"] = "LoanApi.Client"
+        }).Build();
+
+        await Assert.ThrowsAsync<UnauthorizedException>(() =>
+            new AuthService(db, configuration).LoginAsync(new LoginRequest("missing", "Password123!")));
+    }
 }
 
 public sealed class ValidationTests
@@ -253,5 +271,169 @@ public sealed class ValidationTests
 
         Assert.False(result.IsValid);
         Assert.True(result.Errors.Count >= 2);
+    }
+
+    [Fact]
+    public async Task Block_validator_accepts_null_and_future_but_rejects_past_dates()
+    {
+        var validator = new BlockUserValidator();
+
+        var indefinite = await validator.ValidateAsync(new BlockUserRequest(null));
+        var future = await validator.ValidateAsync(new BlockUserRequest(DateTime.UtcNow.AddDays(1)));
+        var past = await validator.ValidateAsync(new BlockUserRequest(DateTime.UtcNow.AddDays(-1)));
+
+        Assert.True(indefinite.IsValid);
+        Assert.True(future.IsValid);
+        Assert.False(past.IsValid);
+        Assert.Contains(past.Errors, x => x.ErrorMessage.Contains("მომავალი UTC თარიღი"));
+    }
+
+    [Fact]
+    public async Task Registration_and_login_validators_cover_valid_and_invalid_requests()
+    {
+        var registerValidator = new RegisterValidator();
+        var valid = await registerValidator.ValidateAsync(new RegisterRequest("Ana", "Test", "ana.test", 25, "ana@example.com", 1000, "Password123"));
+        var invalid = await registerValidator.ValidateAsync(new RegisterRequest("", "", "x!", 10, "bad", -1, "weak"));
+        var emptyLogin = await new LoginValidator().ValidateAsync(new LoginRequest("", ""));
+
+        Assert.True(valid.IsValid);
+        Assert.False(invalid.IsValid);
+        Assert.True(invalid.Errors.Count >= 7);
+        Assert.False(emptyLogin.IsValid);
+        Assert.Equal(2, emptyLogin.Errors.Count);
+    }
+
+    [Fact]
+    public async Task Update_validators_reject_invalid_currency_amount_period_and_enums()
+    {
+        var userResult = await new UpdateLoanValidator().ValidateAsync(
+            new UpdateLoanRequest((LoanType)999, 0, "12", 361));
+        var accountantResult = await new AccountantLoanValidator().ValidateAsync(
+            new UpdateAccountantLoanRequest((LoanType)999, -1, "EURO", 0, (LoanStatus)999));
+
+        Assert.False(userResult.IsValid);
+        Assert.True(userResult.Errors.Count >= 4);
+        Assert.False(accountantResult.IsValid);
+        Assert.True(accountantResult.Errors.Count >= 5);
+    }
+}
+
+public sealed class UserEntityTests
+{
+    private static readonly DateTime Now = new(2026, 8, 25, 12, 0, 0, DateTimeKind.Utc);
+
+    [Fact]
+    public void IsBlockedAt_covers_indefinite_active_expired_and_unblocked_states()
+    {
+        Assert.False(new User().IsBlockedAt(Now));
+        Assert.True(new User { IsBlocked = true }.IsBlockedAt(Now));
+        Assert.True(new User { IsBlocked = true, BlockedUntil = Now.AddMinutes(1) }.IsBlockedAt(Now));
+        Assert.False(new User { IsBlocked = true, BlockedUntil = Now }.IsBlockedAt(Now));
+    }
+
+    [Fact]
+    public void ClearExpiredBlock_only_changes_an_expired_temporary_block()
+    {
+        var unblocked = new User();
+        var indefinite = new User { IsBlocked = true };
+        var active = new User { IsBlocked = true, BlockedUntil = Now.AddMinutes(1) };
+        var expired = new User { IsBlocked = true, BlockedUntil = Now.AddMinutes(-1) };
+
+        Assert.False(unblocked.ClearExpiredBlock(Now));
+        Assert.False(indefinite.ClearExpiredBlock(Now));
+        Assert.False(active.ClearExpiredBlock(Now));
+        Assert.True(expired.ClearExpiredBlock(Now));
+        Assert.False(expired.IsBlocked);
+        Assert.Null(expired.BlockedUntil);
+    }
+}
+
+public sealed class MiddlewareTests
+{
+    [Fact]
+    public async Task Exception_middleware_maps_every_known_error_and_hides_unexpected_details()
+    {
+        var cases = new (Exception Exception, int StatusCode, string Message)[]
+        {
+            (new NotFoundException("missing"), 404, "missing"),
+            (new ConflictException("conflict"), 409, "conflict"),
+            (new ForbiddenException("forbidden"), 403, "forbidden"),
+            (new UnauthorizedException("unauthorized"), 401, "unauthorized"),
+            (new InvalidOperationException("private details"), 500, "სერვერზე მოხდა გაუთვალისწინებელი შიდა შეცდომა.")
+        };
+
+        foreach (var item in cases)
+        {
+            var context = new DefaultHttpContext();
+            context.Response.Body = new MemoryStream();
+            var middleware = new ExceptionHandlingMiddleware(
+                _ => throw item.Exception,
+                NullLogger<ExceptionHandlingMiddleware>.Instance);
+
+            await middleware.InvokeAsync(context);
+            context.Response.Body.Position = 0;
+            string body = await new StreamReader(context.Response.Body).ReadToEndAsync();
+
+            Assert.Equal(item.StatusCode, context.Response.StatusCode);
+            Assert.Contains(item.Message, body);
+            if (item.StatusCode == 500)
+            {
+                Assert.DoesNotContain("private details", body);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Audit_log_storage_failure_does_not_break_the_request()
+    {
+        var db = new LoanDbContext(new DbContextOptionsBuilder<LoanDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        await db.DisposeAsync();
+        using var provider = new ServiceCollection().AddSingleton(db).BuildServiceProvider();
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/test";
+        context.Response.StatusCode = StatusCodes.Status204NoContent;
+        var middleware = new AuditLoggingMiddleware(
+            _ => Task.CompletedTask,
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            TimeProvider.System,
+            NullLogger<AuditLoggingMiddleware>.Instance);
+
+        await middleware.InvokeAsync(context);
+
+        Assert.Equal(StatusCodes.Status204NoContent, context.Response.StatusCode);
+    }
+}
+
+public sealed class JwtConfigurationTests
+{
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Missing_or_blank_key_is_rejected(string? key)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Jwt:Key"] = key })
+            .Build();
+
+        var exception = Assert.Throws<InvalidOperationException>(() => JwtConfiguration.GetSigningKey(configuration));
+
+        Assert.Contains("outside source control", exception.Message);
+    }
+
+    [Fact]
+    public void Short_key_is_rejected_and_long_key_is_returned()
+    {
+        var shortConfiguration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Jwt:Key"] = "too-short" })
+            .Build();
+        const string validKey = "a-valid-signing-key-with-at-least-32-characters";
+        var validConfiguration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Jwt:Key"] = validKey })
+            .Build();
+
+        Assert.Throws<InvalidOperationException>(() => JwtConfiguration.GetSigningKey(shortConfiguration));
+        Assert.Equal(validKey, JwtConfiguration.GetSigningKey(validConfiguration));
     }
 }

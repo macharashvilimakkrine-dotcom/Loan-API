@@ -12,8 +12,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace LoanApi.Api.Infrastructure.Migrations
 {
     [DbContext(typeof(LoanDbContext))]
-    [Migration("20260824154317_SeparateAccountants")]
-    partial class SeparateAccountants
+    [Migration("20260825172217_AddIsBlockedDefault")]
+    partial class AddIsBlockedDefault
     {
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
@@ -188,7 +188,9 @@ namespace LoanApi.Api.Infrastructure.Migrations
                         .HasColumnType("nvarchar(80)");
 
                     b.Property<bool>("IsBlocked")
-                        .HasColumnType("bit");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
 
                     b.Property<string>("LastName")
                         .IsRequired()

@@ -5,11 +5,9 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace LoanApi.Api.Infrastructure.Migrations
 {
-    /// <inheritdoc />
     [System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage]
     public partial class InitialSqlServer : Migration
     {
-        /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.CreateTable(
@@ -111,7 +109,6 @@ namespace LoanApi.Api.Infrastructure.Migrations
                 unique: true);
         }
 
-        /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(

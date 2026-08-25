@@ -1,22 +1,16 @@
 @host = http://localhost:5117
 @token = paste-jwt-token-here
+@username = enter-database-username
+@password = enter-password
+@loanId = enter-loan-id
 
-### Login as the existing local Accountant
+### Login using an account stored in LoanApiDb
 POST {{host}}/api/auth/login
 Content-Type: application/json
 
 {
-  "username": "accountant",
-  "password": "Accountant123!"
-}
-
-### Login as an existing local User
-POST {{host}}/api/auth/login
-Content-Type: application/json
-
-{
-  "username": "nino.user",
-  "password": "User12345!"
+  "username": "{{username}}",
+  "password": "{{password}}"
 }
 
 ### Current user's loans
@@ -40,7 +34,7 @@ GET {{host}}/api/accountant/loans
 Authorization: Bearer {{token}}
 
 ### Accountant: read one loan
-GET {{host}}/api/accountant/loans/1
+GET {{host}}/api/accountant/loans/{{loanId}}
 Authorization: Bearer {{token}}
 
 ### Accountant: read the latest API audit records

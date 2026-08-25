@@ -28,6 +28,7 @@ public sealed class LoanDbContext(DbContextOptions<LoanDbContext> options) : DbC
         users.Property(x => x.Email).HasMaxLength(254).IsRequired();
         users.Property(x => x.PasswordHash).HasMaxLength(100).IsRequired();
         users.Property(x => x.MonthlyIncome).HasPrecision(18, 2);
+        users.Property(x => x.IsBlocked).HasDefaultValue(false);
 
         var loans = modelBuilder.Entity<Loan>();
         loans.Property(x => x.Amount).HasPrecision(18, 2);

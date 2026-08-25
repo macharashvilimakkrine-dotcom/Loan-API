@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace LoanApi.Api.Controllers;
 
-[ApiController, Route("api/users")]
+[ApiController, Route("api/user")]
 public sealed class UsersController(IUserService service) : ControllerBase
 {
     /// <summary>Returns the current user's profile, or any profile for an Accountant.</summary>

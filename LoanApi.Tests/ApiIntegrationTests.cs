@@ -28,6 +28,7 @@ public sealed class LoanApiFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
+        builder.UseSetting("Jwt:Key", "integration-test-key-that-is-not-used-outside-tests");
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<LoanDbContext>();
@@ -136,7 +137,7 @@ public sealed class ApiIntegrationTests
         var response = await client.PostAsJsonAsync("/api/auth/register", request);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("errors", await response.Content.ReadAsStringAsync());
+        Assert.Contains("არასწორი ან ვალიდაციის ვერ გამვლელი მოთხოვნა", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -152,7 +153,7 @@ public sealed class ApiIntegrationTests
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         Assert.NotEmpty((await created.Content.ReadFromJsonAsync<AuthResponse>())!.Token);
         Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
-        Assert.Contains("already in use", await duplicate.Content.ReadAsStringAsync());
+        Assert.Contains("უკვე გამოყენებულია", await duplicate.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -164,8 +165,8 @@ public sealed class ApiIntegrationTests
         var mariam = await LoginAsync(factory.CreateClient(), "mariam.user", "User12345!");
         Authorize(client, nino.Token);
 
-        var ownResponse = await client.GetAsync($"/api/users/{nino.UserId}");
-        var otherResponse = await client.GetAsync($"/api/users/{mariam.UserId}");
+        var ownResponse = await client.GetAsync($"/api/user/{nino.UserId}");
+        var otherResponse = await client.GetAsync($"/api/user/{mariam.UserId}");
 
         Assert.Equal(HttpStatusCode.OK, ownResponse.StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, otherResponse.StatusCode);
@@ -198,7 +199,7 @@ public sealed class ApiIntegrationTests
         var response = await client.PostAsJsonAsync("/api/loans", new CreateLoanRequest(LoanType.FastLoan, 300, "GEL", 4));
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-        Assert.Contains("Blocked users", await response.Content.ReadAsStringAsync());
+        Assert.Contains("დაბლოკილ მომხმარებელს", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -351,7 +352,7 @@ public sealed class ApiIntegrationTests
         var body = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-        Assert.Contains("Loan was not found", body);
+        Assert.Contains("მოთხოვნილი სესხი ვერ მოიძებნა", body);
         Assert.DoesNotContain("stack", body, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -365,9 +366,9 @@ public sealed class ApiIntegrationTests
         var user = await LoginAsync(userClient, "mariam.user", "User12345!");
         Authorize(userClient, user.Token);
 
-        var blockResponse = await accountantClient.PutAsJsonAsync($"/api/users/{user.UserId}/block", new BlockUserRequest(null));
+        var blockResponse = await accountantClient.PutAsJsonAsync($"/api/user/{user.UserId}/block", new BlockUserRequest(null));
         var deniedResponse = await userClient.PostAsJsonAsync("/api/loans", new CreateLoanRequest(LoanType.FastLoan, 100, "GEL", 2));
-        var unblockResponse = await accountantClient.PutAsync($"/api/users/{user.UserId}/unblock", null);
+        var unblockResponse = await accountantClient.PutAsync($"/api/user/{user.UserId}/unblock", null);
         var allowedResponse = await userClient.PostAsJsonAsync("/api/loans", new CreateLoanRequest(LoanType.FastLoan, 100, "GEL", 2));
 
         Assert.Equal(HttpStatusCode.NoContent, blockResponse.StatusCode);
@@ -385,10 +386,10 @@ public sealed class ApiIntegrationTests
         Authorize(accountantClient, (await LoginAsync(accountantClient, "accountant", "Accountant123!")).Token);
         var user = await LoginAsync(userClient, "nino.user", "User12345!");
 
-        var profileResponse = await accountantClient.GetAsync($"/api/users/{user.UserId}");
-        var missingProfileResponse = await accountantClient.GetAsync("/api/users/999999");
-        var missingBlockResponse = await accountantClient.PutAsJsonAsync("/api/users/999999/block", new BlockUserRequest(null));
-        var missingUnblockResponse = await accountantClient.PutAsync("/api/users/999999/unblock", null);
+        var profileResponse = await accountantClient.GetAsync($"/api/user/{user.UserId}");
+        var missingProfileResponse = await accountantClient.GetAsync("/api/user/999999");
+        var missingBlockResponse = await accountantClient.PutAsJsonAsync("/api/user/999999/block", new BlockUserRequest(null));
+        var missingUnblockResponse = await accountantClient.PutAsync("/api/user/999999/unblock", null);
 
         Assert.Equal(HttpStatusCode.OK, profileResponse.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, missingProfileResponse.StatusCode);
@@ -412,6 +413,109 @@ public sealed class ApiIntegrationTests
         var response = await userClient.PutAsJsonAsync($"/api/loans/{someoneElsesLoan.Id}", update);
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Authentication_failures_return_safe_json_messages()
+    {
+        using var factory = new LoanApiFactory();
+        using var anonymousClient = factory.CreateClient();
+        using var userClient = factory.CreateClient();
+
+        var unauthorized = await anonymousClient.GetAsync("/api/loans");
+        Authorize(userClient, (await LoginAsync(userClient, "nino.user", "User12345!")).Token);
+        var forbidden = await userClient.GetAsync("/api/accountant/loans");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
+        Assert.Contains("მომხმარებელი არაავთენტიფიცირებულია", await unauthorized.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        Assert.Contains("მოთხოვნილი მოქმედების შესრულების უფლება არ აქვს", await forbidden.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Invalid_login_returns_unauthorized_json_message()
+    {
+        using var factory = new LoanApiFactory();
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/auth/login", new LoginRequest("unknown", "Wrong123!"));
+        string body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Contains("მომხმარებლის სახელი ან პაროლი არასწორია", body);
+        Assert.DoesNotContain("stack", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Singular_user_route_returns_the_profile()
+    {
+        using var factory = new LoanApiFactory();
+        using var client = factory.CreateClient();
+        var user = await LoginAsync(client, "nino.user", "User12345!");
+        Authorize(client, user.Token);
+
+        var profile = await client.GetFromJsonAsync<UserResponse>($"/api/user/{user.UserId}");
+
+        Assert.NotNull(profile);
+        Assert.Equal(user.UserId, profile.Id);
+    }
+
+    [Fact]
+    public async Task User_update_persists_all_editable_fields()
+    {
+        using var factory = new LoanApiFactory();
+        using var client = factory.CreateClient();
+        Authorize(client, (await LoginAsync(client, "nino.user", "User12345!")).Token);
+        var loans = await client.GetFromJsonAsync<List<LoanResponse>>("/api/loans", JsonOptions);
+        var target = loans!.First(x => x.Status == LoanStatus.Processing);
+        var update = new UpdateLoanRequest(LoanType.FastLoan, 4321.50m, "usd", 15);
+
+        var updateResponse = await client.PutAsJsonAsync($"/api/loans/{target.Id}", update);
+        var changed = await client.GetFromJsonAsync<LoanResponse>($"/api/loans/{target.Id}", JsonOptions);
+
+        Assert.Equal(HttpStatusCode.NoContent, updateResponse.StatusCode);
+        Assert.Equal(LoanType.FastLoan, changed!.LoanType);
+        Assert.Equal(4321.50m, changed.Amount);
+        Assert.Equal("USD", changed.Currency);
+        Assert.Equal(15, changed.Period);
+        Assert.Equal(LoanStatus.Processing, changed.Status);
+    }
+
+    [Fact]
+    public async Task User_cannot_delete_another_users_or_non_processing_loan()
+    {
+        using var factory = new LoanApiFactory();
+        using var accountantClient = factory.CreateClient();
+        using var userClient = factory.CreateClient();
+        Authorize(accountantClient, (await LoginAsync(accountantClient, "accountant", "Accountant123!")).Token);
+        var nino = await LoginAsync(userClient, "nino.user", "User12345!");
+        Authorize(userClient, nino.Token);
+        var allLoans = await accountantClient.GetFromJsonAsync<List<LoanResponse>>("/api/accountant/loans", JsonOptions);
+        Assert.NotNull(allLoans);
+        var anotherUsersLoan = allLoans.First(x => x.UserId != nino.UserId && x.Status == LoanStatus.Processing);
+        var ownFinalLoan = allLoans.First(x => x.UserId == nino.UserId && x.Status != LoanStatus.Processing);
+
+        var anotherResponse = await userClient.DeleteAsync($"/api/loans/{anotherUsersLoan.Id}");
+        var finalResponse = await userClient.DeleteAsync($"/api/loans/{ownFinalLoan.Id}");
+
+        Assert.Equal(HttpStatusCode.Forbidden, anotherResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, finalResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Invalid_enum_values_are_rejected_before_service_execution()
+    {
+        using var factory = new LoanApiFactory();
+        using var client = factory.CreateClient();
+        Authorize(client, (await LoginAsync(client, "nino.user", "User12345!")).Token);
+        const string invalidLoan = """
+            { "loanType": 999, "amount": 100, "currency": "GEL", "period": 2 }
+            """;
+
+        var response = await client.PostAsync("/api/loans", new StringContent(invalidLoan, System.Text.Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("არასწორი ან ვალიდაციის ვერ გამვლელი მოთხოვნა", await response.Content.ReadAsStringAsync());
     }
 
     private static async Task<AuthResponse> LoginAsync(HttpClient client, string username, string password)
