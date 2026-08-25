@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+**/TestResults/
+**/logs/
+**/.data-protection-keys/
+*.db-shm
+*.db-wal
+*.db
+*.pptx
+*.pdf

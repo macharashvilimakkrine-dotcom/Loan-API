@@ -1,2 +1,2 @@
-# Loan API
-Finals Projects
+# Final project
+Loan api

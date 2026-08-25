@@ -1,0 +1,48 @@
+@host = http://localhost:5117
+@token = paste-jwt-token-here
+
+### Login as the existing local Accountant
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "accountant",
+  "password": "Accountant123!"
+}
+
+### Login as an existing local User
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "nino.user",
+  "password": "User12345!"
+}
+
+### Current user's loans
+GET {{host}}/api/loans
+Authorization: Bearer {{token}}
+
+### Create a Processing loan
+POST {{host}}/api/loans
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "loanType": "FastLoan",
+  "amount": 500,
+  "currency": "gel",
+  "period": 6
+}
+
+### Accountant: read all loans
+GET {{host}}/api/accountant/loans
+Authorization: Bearer {{token}}
+
+### Accountant: read one loan
+GET {{host}}/api/accountant/loans/1
+Authorization: Bearer {{token}}
+
+### Accountant: read the latest API audit records
+GET {{host}}/api/accountant/audit-logs
+Authorization: Bearer {{token}}
